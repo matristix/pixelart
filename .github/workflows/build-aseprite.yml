@@ -1,97 +1,97 @@
 name: Build and release Aseprite
 
 on:
-workflow_dispatch:
+  workflow_dispatch:
 
 permissions:
-contents: write
+  contents: write
 
 jobs:
-build:
-name: Build Aseprite for Linux
-runs-on: ubuntu-latest
+  build:
+    name: Build Aseprite for Linux
+    runs-on: ubuntu-latest
 
-steps:
-  - name: Install dependencies
-    run: |
-      sudo apt-get update -qq
-      sudo apt-get install -y \
-        libpixman-1-dev \
-        libfreetype6-dev \
-        libharfbuzz-dev \
-        zlib1g-dev \
-        libx11-dev \
-        libxcursor-dev \
-        libxi-dev \
-        libxrandr-dev \
-        libgl1-mesa-dev \
-        libfontconfig1-dev \
-        cmake \
-        ninja-build \
-        git \
-        wget \
-        unzip \
-        p7zip-full
+    steps:
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y \
+            libpixman-1-dev \
+            libfreetype6-dev \
+            libharfbuzz-dev \
+            zlib1g-dev \
+            libx11-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxrandr-dev \
+            libgl1-mesa-dev \
+            libfontconfig1-dev \
+            cmake \
+            ninja-build \
+            git \
+            wget \
+            unzip \
+            p7zip-full
 
-  - name: Find latest Aseprite release
-    id: release
-    shell: bash
-    run: |
-      TAG=$(curl -fsSL https://api.github.com/repos/aseprite/aseprite/releases/latest | jq -r '.tag_name')
-      echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-      echo "Building Aseprite $TAG"
+      - name: Find latest Aseprite release
+        id: release
+        shell: bash
+        run: |
+          TAG=$(curl -fsSL https://api.github.com/repos/aseprite/aseprite/releases/latest | jq -r '.tag_name')
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Building Aseprite $TAG"
 
-  - name: Download Aseprite
-    run: |
-      git clone \
-        --recurse-submodules \
-        -j8 \
-        --branch "${{ steps.release.outputs.tag }}" \
-        https://github.com/aseprite/aseprite.git
+      - name: Download Aseprite
+        run: |
+          git clone \
+            --recurse-submodules \
+            -j8 \
+            --branch "${{ steps.release.outputs.tag }}" \
+            https://github.com/aseprite/aseprite.git
 
-  - name: Download Skia
-    working-directory: aseprite
-    run: |
-      wget -q \
-        https://github.com/aseprite/skia/releases/download/m124-08a5439a6b/Skia-Linux-Release-x64.zip \
-        -O skia.zip
+      - name: Download Skia
+        working-directory: aseprite
+        run: |
+          wget -q \
+            https://github.com/aseprite/skia/releases/download/m124-08a5439a6b/Skia-Linux-Release-x64.zip \
+            -O skia.zip
 
-      mkdir skia
-      unzip -q skia.zip -d skia
+          mkdir skia
+          unzip -q skia.zip -d skia
 
-  - name: Configure Aseprite
-    working-directory: aseprite
-    run: |
-      cmake -S . -B build -G Ninja \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DENABLE_TESTS=OFF \
-        -DENABLE_SCRIPTING=ON \
-        -DENABLE_CCACHE=OFF \
-        -DLAF_BACKEND=skia \
-        -DSKIA_DIR="$(realpath skia)" \
-        -DOPENSSL_USE_STATIC_LIBS=ON \
-        -DSKIA_LIBRARY_DIR="$(realpath skia/out/Release-x64)"
+      - name: Configure Aseprite
+        working-directory: aseprite
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DENABLE_TESTS=OFF \
+            -DENABLE_SCRIPTING=ON \
+            -DENABLE_CCACHE=OFF \
+            -DLAF_BACKEND=skia \
+            -DSKIA_DIR="$(realpath skia)" \
+            -DOPENSSL_USE_STATIC_LIBS=ON \
+            -DSKIA_LIBRARY_DIR="$(realpath skia/out/Release-x64)"
 
-  - name: Compile Aseprite
-    working-directory: aseprite
-    run: |
-      ninja -C build
+      - name: Compile Aseprite
+        working-directory: aseprite
+        run: |
+          ninja -C build
 
-  - name: Create portable ZIP
-    working-directory: aseprite/build/bin
-    run: |
-      echo '# Portable Aseprite' > aseprite.ini
-      7z -tzip a \
-        "Aseprite-${{ steps.release.outputs.tag }}-Linux-x64.zip" \
-        *
+      - name: Create portable ZIP
+        working-directory: aseprite/build/bin
+        run: |
+          echo '# Portable Aseprite' > aseprite.ini
+          7z -tzip a \
+            "Aseprite-${{ steps.release.outputs.tag }}-Linux-x64.zip" \
+            *
 
-  - name: Create GitHub Release
-    uses: softprops/action-gh-release@v2
-    with:
-      tag_name: ${{ steps.release.outputs.tag }}
-      name: Aseprite ${{ steps.release.outputs.tag }}
-      body: |
-        Automatically compiled Linux x64 build of Aseprite.
-      files: |
-        aseprite/build/bin/Aseprite-${{ steps.release.outputs.tag }}-Linux-x64.zip
-      overwrite_files: true
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release.outputs.tag }}
+          name: Aseprite ${{ steps.release.outputs.tag }}
+          body: |
+            Automatically compiled Linux x64 build of Aseprite.
+          files: |
+            aseprite/build/bin/Aseprite-${{ steps.release.outputs.tag }}-Linux-x64.zip
+          overwrite_files: true
