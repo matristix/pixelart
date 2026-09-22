@@ -1,103 +1,170 @@
-name: Build Aseprite v1.3.18.6 (Arch/CachyOS)
+name: Build Aseprite
 
 on:
-  workflow_dispatch:
+workflow_dispatch:
 
-env:
-  BUILD_TYPE: Release
-  ASEPRITE_VERSION: v1.3.18.6
+permissions:
+contents: write
 
 jobs:
-  build-aseprite-arch:
-    name: Build Aseprite for Arch Linux
-    runs-on: ubuntu-latest
-    container:
-      image: archlinux:latest
-    permissions:
-      contents: write
-    steps:
-      - name: Install Native Arch Dependencies
-        run: |
-          pacman -Syu --noconfirm
-          pacman -S --noconfirm base-devel cmake ninja git unzip wget \
-            libx11 libxcursor libxi libxrandr mesa libglvnd fontconfig \
-            pixman freetype2 harfbuzz zlib libxfixes libxinerama \
-            libxcomposite gtk3 gdk-pixbuf2 cairo pango atk p7zip clang
+get-release:
+name: Find latest Aseprite release
+runs-on: ubuntu-latest
+outputs:
+tag: ${{ steps.release.outputs.tag }}
 
-      - name: Clone Target Aseprite Tag and Submodules
-        uses: actions/checkout@v4
-        with:
-          repository: 'aseprite/aseprite'
-          ref: ${{ env.ASEPRITE_VERSION }}
-          path: 'aseprite'
-          submodules: 'recursive'
-      
-      - name: Ensure Submodules are fully updated
-        working-directory: aseprite
-        run: |
-          git submodule update --init --recursive
+steps:
+  - name: Find latest release
+    id: release
+    shell: bash
+    run: |
+      set -euo pipefail
 
-      # Secure internal checkout of the pre-built Skia binaries (Bypasses curl/wget token blocks)
-      - name: Fetch Compatible Skia Library via Checkout
-        uses: actions/checkout@v4
-        with:
-          repository: 'aseprite/skia'
-          ref: 'm124-08a5439a6b' # Uses the exact release hash requested by your PKGBUILD
-          path: 'skia-repo'
+      release_json="$(curl -fsSL https://api.github.com/repos/aseprite/aseprite/releases/latest)"
 
-      - name: Move Skia Binaries into Place
-        run: |
-          mkdir -p aseprite/skia
-          # Moves the compiled binary components out of the checked-out repo
-          cp -r skia-repo/* aseprite/skia/
-      
-      - name: Configure Project via CMake
-        working-directory: aseprite
-        run: |
-          export CC=clang
-          export CXX=clang++
-          
-          cmake -S . -B build -G Ninja \
-            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
-            -DENABLE_TESTS=OFF \
-            -DENABLE_SCRIPTING=ON \
-            -DENABLE_CCACHE=OFF \
-            -DLAF_BACKEND=skia \
-            -DSKIA_DIR=$(realpath skia) \
-            -DOPENSSL_USE_STATIC_LIBS=ON \
-            -DSKIA_LIBRARY_DIR=$(realpath skia/out/Release-x64)
-            
-      - name: Compile Source Code
-        working-directory: aseprite
-        run: |
-          cd build && ninja -j$(nproc)
-          
-      - name: Trim Extra Build Garbage
-        working-directory: aseprite/build/bin
-        run: |
-          find . -mindepth 1 ! \( -name 'aseprite' -o -name 'data' -prune \) -exec rm -rf {} +
-          
-      - name: Establish Portable Flags
-        working-directory: aseprite/build/bin
-        run: |
-          echo '# Forces Aseprite to write preferences to its local path' > aseprite.ini
-          chmod +x aseprite
-          
-          cat > Aseprite.sh << 'EOF'
-          #!/bin/bash
-          SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE}")" && pwd)"
-          cd "$SCRIPT_DIR"
-          ./aseprite "$@"
-          EOF
-          chmod +x Aseprite.sh
-          
-      - name: Compress Target Directory
-        working-directory: aseprite/build/bin
-        run: |
-          7z a Aseprite-${{ env.ASEPRITE_VERSION }}-ArchLinux.zip *
-          
-      - name: Export Application Package
-        uses: actions/upload-artifact@v4
-        with:
-          name: Aseprite-${{ env.ASEPRITE_VERSION }}-ArchLinux
-          path: aseprite/build/bin/Aseprite-${{ env.ASEPRITE_VERSION }}-ArchLinux.zip
+      tag="$(echo "$release_json" | jq -r '.tag_name')"
+
+      if [[ -z "$tag" || "$tag" == "null" ]]; then
+        echo "Could not determine latest Aseprite release"
+        exit 1
+      fi
+
+      echo "Latest Aseprite release: $tag"
+      echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+
+build:
+name: Build Aseprite for Linux
+needs: get-release
+runs-on: ubuntu-latest
+
+steps:
+  - name: Install dependencies
+    shell: bash
+    run: |
+      set -euo pipefail
+
+      sudo apt-get update -qq
+
+      sudo apt-get install -y \
+        build-essential \
+        cmake \
+        git \
+        ninja-build \
+        wget \
+        unzip \
+        p7zip-full \
+        libpixman-1-dev \
+        libfreetype6-dev \
+        libharfbuzz-dev \
+        zlib1g-dev \
+        libx11-dev \
+        libxcursor-dev \
+        libxi-dev \
+        libxrandr-dev \
+        libgl1-mesa-dev \
+        libfontconfig1-dev
+
+  - name: Checkout Aseprite
+    shell: bash
+    run: |
+      set -euo pipefail
+
+      git clone \
+        --recurse-submodules \
+        -j8 \
+        --branch "${{ needs.get-release.outputs.tag }}" \
+        https://github.com/aseprite/aseprite.git
+
+  - name: Download Skia
+    working-directory: aseprite
+    shell: bash
+    run: |
+      set -euo pipefail
+
+      wget -q \
+        https://github.com/aseprite/skia/releases/download/m124-08a5439a6b/Skia-Linux-Release-x64.zip \
+        -O Skia-Linux-Release-x64.zip
+
+      mkdir -p skia
+
+      unzip -q Skia-Linux-Release-x64.zip -d skia
+
+  - name: Install Ninja
+    uses: aseprite/get-ninja@main
+
+  - name: Configure
+    working-directory: aseprite
+    shell: bash
+    run: |
+      set -euo pipefail
+
+      export enable_ccache=off
+      export laf_backend=skia
+      export enable_scripting=on
+
+      cmake \
+        -S . \
+        -B build \
+        -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_OSX_DEPLOYMENT_TARGET=10.9 \
+        -DENABLE_TESTS=OFF \
+        -DENABLE_SCRIPTING="$enable_scripting" \
+        -DENABLE_CCACHE="$enable_ccache" \
+        -DLAF_BACKEND="$laf_backend" \
+        -DSKIA_DIR="$(realpath skia)" \
+        -DOPENSSL_USE_STATIC_LIBS=ON \
+        -DSKIA_LIBRARY_DIR="$(realpath skia/out/Release-x64)"
+
+  - name: Compile
+    working-directory: aseprite
+    shell: bash
+    run: |
+      set -euo pipefail
+
+      ninja -C build
+
+  - name: Prepare portable package
+    working-directory: aseprite/build/bin
+    shell: bash
+    run: |
+      set -euo pipefail
+
+      # Keep only the files required to run Aseprite.
+      find . -mindepth 1 \
+        ! -name 'aseprite' \
+        ! -name 'data' \
+        ! -name 'aseprite.ini' \
+        -exec rm -rf {} +
+
+      # Tell Aseprite to use its own directory as the portable location.
+      echo '# This file is here so Aseprite behaves as a portable program' > aseprite.ini
+
+  - name: Create ZIP
+    working-directory: aseprite/build/bin
+    shell: bash
+    run: |
+      set -euo pipefail
+
+      VERSION="${{ needs.get-release.outputs.tag }}"
+
+      7z -tzip a \
+        "Aseprite-${VERSION}-Linux-x64.zip" \
+        *
+
+  - name: Create GitHub Release
+    uses: softprops/action-gh-release@v2
+    with:
+      tag_name: ${{ needs.get-release.outputs.tag }}
+      name: Aseprite ${{ needs.get-release.outputs.tag }}
+      body: |
+        Automatically compiled Linux x64 build of Aseprite.
+
+        Source:
+        https://github.com/aseprite/aseprite/releases/tag/${{ needs.get-release.outputs.tag }}
+
+        Built by GitHub Actions.
+      files: |
+        aseprite/build/bin/Aseprite-${{ needs.get-release.outputs.tag }}-Linux-x64.zip
+      overwrite_files: true
