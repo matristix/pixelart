@@ -24,7 +24,6 @@ jobs:
             pixman freetype2 harfbuzz zlib libxfixes libxinerama \
             libxcomposite gtk3 gdk-pixbuf2 cairo pango atk p7zip clang
 
-      # This replaces the manual git clone step to avoid container syntax bugs
       - name: Clone Target Aseprite Tag and Submodules
         uses: actions/checkout@v4
         with:
@@ -33,7 +32,6 @@ jobs:
           path: 'aseprite'
           submodules: 'recursive'
       
-      # The checkout action defaults to a shallow fetch. We fetch depth to make sure building is smooth.
       - name: Ensure Submodules are fully updated
         working-directory: aseprite
         run: |
@@ -42,7 +40,8 @@ jobs:
       - name: Fetch Compatible Skia Library
         working-directory: aseprite
         run: |
-          wget https://github.com
+          # Wrapped inside single quotes to prevent terminal string break bugs
+          wget 'https://github.com' -O Skia-Linux-Release-x64.zip
           unzip Skia-Linux-Release-x64.zip -d skia
       
       - name: Configure Project via CMake
