@@ -36,13 +36,20 @@ jobs:
         working-directory: aseprite
         run: |
           git submodule update --init --recursive
-      
-      - name: Fetch Compatible Skia Library
-        working-directory: aseprite
+
+      # Secure internal checkout of the pre-built Skia binaries (Bypasses curl/wget token blocks)
+      - name: Fetch Compatible Skia Library via Checkout
+        uses: actions/checkout@v4
+        with:
+          repository: 'aseprite/skia'
+          ref: 'm124-08a5439a6b' # Uses the exact release hash requested by your PKGBUILD
+          path: 'skia-repo'
+
+      - name: Move Skia Binaries into Place
         run: |
-          # Wrapped inside single quotes to prevent terminal string break bugs
-          wget 'https://github.com' -O Skia-Linux-Release-x64.zip
-          unzip Skia-Linux-Release-x64.zip -d skia
+          mkdir -p aseprite/skia
+          # Moves the compiled binary components out of the checked-out repo
+          cp -r skia-repo/* aseprite/skia/
       
       - name: Configure Project via CMake
         working-directory: aseprite
