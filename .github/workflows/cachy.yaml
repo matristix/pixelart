@@ -1,0 +1,91 @@
+name: Build Aseprite v1.3.18.6 (Arch/CachyOS)
+
+on:
+  workflow_dispatch: # Allows manually clicking "Run workflow" from GitHub Actions
+
+env:
+  BUILD_TYPE: Release
+  ASEPRITE_VERSION: v1.3.18.6
+
+jobs:
+  build-aseprite-arch:
+    name: Build Aseprite for Arch Linux
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest # Forces GitHub runners to compile inside an Arch Linux environment
+    permissions:
+      contents: write
+    steps:
+      - name: Install Native Arch Dependencies
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm base-devel cmake ninja git unzip wget \
+            libx11 libxcursor libxi libxrandr mesa libglvnd fontconfig \
+            pixman freetype2 harfbuzz zlib libxfixes libxinerama \
+            libxcomposite gtk3 gdk-pixbuf2 cairo pango atk p7zip clang
+
+      - name: Checkout Script Repo
+        uses: actions/checkout@v4
+      
+      - name: Clone Target Aseprite Tag
+        run: |
+          # Clones exactly version 1.3.18.6 alongside its matching internal dependencies
+          git clone --recurse-submodules -j8 https://github.com --branch ${{ env.ASEPRITE_VERSION }}
+      
+      - name: Fetch Compatible Skia Library
+        working-directory: aseprite
+        run: |
+          # Downloads the specific Skia rendering engine branch required by Aseprite
+          wget https://github.com
+          unzip Skia-Linux-Release-x64.zip -d skia
+      
+      - name: Configure Project via CMake
+        working-directory: aseprite
+        run: |
+          export CC=clang
+          export CXX=clang++
+          
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+            -DENABLE_TESTS=OFF \
+            -DENABLE_SCRIPTING=ON \
+            -DENABLE_CCACHE=OFF \
+            -DLAF_BACKEND=skia \
+            -DSKIA_DIR=$(realpath skia) \
+            -DOPENSSL_USE_STATIC_LIBS=ON \
+            -DSKIA_LIBRARY_DIR=$(realpath skia/out/Release-x64)
+            
+      - name: Compile Source Code
+        working-directory: aseprite
+        run: |
+          cd build && ninja -j$(nproc)
+          
+      - name: Trim Extra Build Garbage
+        working-directory: aseprite/build/bin
+        run: |
+          find . -mindepth 1 ! \( -name 'aseprite' -o -name 'data' -prune \) -exec rm -rf {} +
+          
+      - name: Establish Portable Flags
+        working-directory: aseprite/build/bin
+        run: |
+          echo '# Forces Aseprite to write preferences to its local path' > aseprite.ini
+          chmod +x aseprite
+          
+          cat > Aseprite.sh << 'EOF'
+          #!/bin/bash
+          SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+          cd "$SCRIPT_DIR"
+          ./aseprite "$@"
+          EOF
+          chmod +x Aseprite.sh
+          
+      - name: Compress Target Directory
+        working-directory: aseprite/build/bin
+        run: |
+          7z a Aseprite-${{ env.ASEPRITE_VERSION }}-ArchLinux.zip *
+          
+      - name: Export Application Package
+        uses: actions/upload-artifact@v4
+        with:
+          name: Aseprite-${{ env.ASEPRITE_VERSION }}-ArchLinux
+          path: aseprite/build/bin/Aseprite-${{ env.ASEPRITE_VERSION }}-ArchLinux.zip
