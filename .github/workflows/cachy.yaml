@@ -1,7 +1,7 @@
 name: Build Aseprite v1.3.18.6 (Arch/CachyOS)
 
 on:
-  workflow_dispatch: # Allows manually clicking "Run workflow" from GitHub Actions
+  workflow_dispatch:
 
 env:
   BUILD_TYPE: Release
@@ -12,7 +12,7 @@ jobs:
     name: Build Aseprite for Arch Linux
     runs-on: ubuntu-latest
     container:
-      image: archlinux:latest # Forces GitHub runners to compile inside an Arch Linux environment
+      image: archlinux:latest
     permissions:
       contents: write
     steps:
@@ -24,18 +24,24 @@ jobs:
             pixman freetype2 harfbuzz zlib libxfixes libxinerama \
             libxcomposite gtk3 gdk-pixbuf2 cairo pango atk p7zip clang
 
-      - name: Checkout Script Repo
+      # This replaces the manual git clone step to avoid container syntax bugs
+      - name: Clone Target Aseprite Tag and Submodules
         uses: actions/checkout@v4
+        with:
+          repository: 'aseprite/aseprite'
+          ref: ${{ env.ASEPRITE_VERSION }}
+          path: 'aseprite'
+          submodules: 'recursive'
       
-      - name: Clone Target Aseprite Tag
+      # The checkout action defaults to a shallow fetch. We fetch depth to make sure building is smooth.
+      - name: Ensure Submodules are fully updated
+        working-directory: aseprite
         run: |
-          # Clones exactly version 1.3.18.6 alongside its matching internal dependencies
-          git clone --recurse-submodules -j8 https://github.com --branch ${{ env.ASEPRITE_VERSION }}
+          git submodule update --init --recursive
       
       - name: Fetch Compatible Skia Library
         working-directory: aseprite
         run: |
-          # Downloads the specific Skia rendering engine branch required by Aseprite
           wget https://github.com
           unzip Skia-Linux-Release-x64.zip -d skia
       
@@ -73,7 +79,7 @@ jobs:
           
           cat > Aseprite.sh << 'EOF'
           #!/bin/bash
-          SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+          SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE}")" && pwd)"
           cd "$SCRIPT_DIR"
           ./aseprite "$@"
           EOF
